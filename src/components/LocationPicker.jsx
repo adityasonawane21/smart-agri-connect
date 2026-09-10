@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { API } from "../config";
+
+const DEFAULT_MAP_CENTER = { lat: 19.076, lng: 72.8777, label: "Mumbai, Maharashtra, India" };
+const LOCAL_PLACES = [
+  DEFAULT_MAP_CENTER,
+  { lat: 19.9975, lng: 73.7898, label: "Nashik, Maharashtra, India" },
+  { lat: 18.5204, lng: 73.8567, label: "Pune, Maharashtra, India" },
+  { lat: 19.033, lng: 73.0297, label: "Navi Mumbai, Maharashtra, India" },
+  { lat: 19.2183, lng: 72.9781, label: "Thane, Maharashtra, India" },
+];
 
 /**
  * LocationPicker Component
@@ -59,8 +70,18 @@ function LocationPicker({
     }
     setLoading(true);
     setError("");
+    const fallbackPlaces = LOCAL_PLACES
+      .filter((place) => place.label.toLowerCase().includes(text.trim().toLowerCase()))
+      .map((place) => ({
+        display_name: place.label,
+        address: place.label,
+        lat: place.lat,
+        lng: place.lng,
+        type: "local_fallback",
+      }));
     try {
       const res = await fetch(`${API}/api/locations/search?q=${encodeURIComponent(text.trim())}`);
+      if (!res.ok) throw new Error("Location search unavailable");
       const data = await res.json();
       if (data.success && Array.isArray(data.places)) {
         setSuggestions(data.places);
@@ -68,9 +89,19 @@ function LocationPicker({
         if (data.places.length === 0) {
           setError("No places found. Try another search term or click on the map.");
         }
+      } else {
+        throw new Error("Invalid location search response");
       }
     } catch (e) {
-      setError("Unable to search this location. Try again.");
+      // Render can briefly cold-start. Keep common Indian city searches usable
+      // while the server-side geocoder becomes available.
+      setSuggestions(fallbackPlaces);
+      setShowDropdown(fallbackPlaces.length > 0);
+      setError(
+        fallbackPlaces.length
+          ? "Using an offline city suggestion while search wakes up."
+          : "Unable to search this location. Click the map to pin it instead."
+      );
     } finally {
       setLoading(false);
     }
@@ -142,16 +173,16 @@ function LocationPicker({
   };
 
   // Initialize or update Leaflet Map
-  const updateMap = useCallback((lat, lng, title = "Selected Location") => {
-    if (!window.L || !mapContainerRef.current) return;
+  const updateMap = useCallback((lat, lng, title = "Selected Location", showMarker = true) => {
+    if (!mapContainerRef.current) return;
 
     if (!leafletMapRef.current) {
-      const map = window.L.map(mapContainerRef.current, {
+      const map = L.map(mapContainerRef.current, {
         center: [lat, lng],
         zoom: 13,
       });
 
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap contributors",
         maxZoom: 19,
       }).addTo(map);
@@ -169,7 +200,12 @@ function LocationPicker({
       leafletMapRef.current.setView([lat, lng], 13);
     }
 
-    const icon = window.L.divIcon({
+    // Leaflet needs a size refresh after React has laid out the map container.
+    requestAnimationFrame(() => leafletMapRef.current?.invalidateSize());
+
+    if (!showMarker) return;
+
+    const icon = L.divIcon({
       className: "",
       html: `<div class="location-picker-marker">📍</div>`,
       iconSize: [32, 32],
@@ -179,7 +215,7 @@ function LocationPicker({
     if (markerRef.current) {
       markerRef.current.setLatLng([lat, lng]).bindPopup(`<strong>${title}</strong>`).openPopup();
     } else {
-      markerRef.current = window.L.marker([lat, lng], { icon, draggable: true })
+      markerRef.current = L.marker([lat, lng], { icon, draggable: true })
         .addTo(leafletMapRef.current)
         .bindPopup(`<strong>${title}</strong>`)
         .openPopup();
@@ -191,28 +227,11 @@ function LocationPicker({
     }
   }, []);
 
-  // Load Leaflet dynamically if not loaded
+  // Start with a usable Mumbai map even before the user selects a suggestion.
+  // Leaflet is bundled with the app, avoiding a CDN script that can be blocked.
   useEffect(() => {
-    if (window.L) {
-      if (selectedLocation?.lat && selectedLocation?.lng) {
-        updateMap(selectedLocation.lat, selectedLocation.lng, selectedLocation.address);
-      }
-      return;
-    }
-
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(link);
-
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.onload = () => {
-      if (selectedLocation?.lat && selectedLocation?.lng) {
-        updateMap(selectedLocation.lat, selectedLocation.lng, selectedLocation.address);
-      }
-    };
-    document.head.appendChild(script);
+    const location = selectedLocation || DEFAULT_MAP_CENTER;
+    updateMap(location.lat, location.lng, location.address || location.label, Boolean(selectedLocation));
 
     return () => {
       if (leafletMapRef.current) {
@@ -224,7 +243,7 @@ function LocationPicker({
 
   // Update map when selected location changes
   useEffect(() => {
-    if (selectedLocation?.lat && selectedLocation?.lng && window.L) {
+    if (selectedLocation?.lat && selectedLocation?.lng) {
       updateMap(selectedLocation.lat, selectedLocation.lng, selectedLocation.address);
     }
   }, [selectedLocation, updateMap]);
