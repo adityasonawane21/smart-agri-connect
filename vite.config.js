@@ -4,7 +4,7 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // A relative asset base works both on GitHub Pages (project sites) and when
-  // the frontend is served by Express.
-  base: './',
+  // GitHub Pages serves this project from a repository subpath. An explicit
+  // base makes every compiled JavaScript and CSS URL resolve from that path.
+  base: '/smart-agri-connect/',
 })
