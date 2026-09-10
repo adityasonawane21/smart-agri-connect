@@ -29,9 +29,9 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Set this repository Actions secret to the public HTTPS URL of the
-          # Express API (for example, https://smart-agri-connect.onrender.com).
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # This is a public browser-facing API URL, not a secret. Baking it
+          # into the static site lets GitHub Pages call the Render backend.
+          VITE_API_URL: https://smart-agri-connect.onrender.com
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

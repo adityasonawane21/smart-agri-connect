@@ -89,6 +89,9 @@ function getDbConfig() {
 }
 
 const dbConfig = getDbConfig();
+console.log(
+  `Database target: ${dbConfig.uri ? "configured URL" : `${dbConfig.host}/${dbConfig.database}`}`
+);
 const db = dbConfig.uri
   ? mysql.createConnection(
       dbConfig.uri +
