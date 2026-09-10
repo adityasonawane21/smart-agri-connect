@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API } from "../config";
+import LocationPicker from "./LocationPicker";
 
 function CreateListing() {
   const navigate = useNavigate();
@@ -12,6 +13,8 @@ function CreateListing() {
     unit: "KG",
     price_per_unit: "",
     location: user?.location || "",
+    latitude: null,
+    longitude: null,
     size: "ANY",
     quality: "ANY",
     condition_type: "ANY",
@@ -65,6 +68,8 @@ function CreateListing() {
       data.append("unit", formData.unit);
       data.append("price_per_unit", formData.price_per_unit);
       data.append("location", formData.location);
+      if (formData.latitude) data.append("latitude", formData.latitude);
+      if (formData.longitude) data.append("longitude", formData.longitude);
       data.append("size", formData.size);
       data.append("quality", formData.quality);
       data.append("condition_type", formData.condition_type);
@@ -193,13 +198,21 @@ function CreateListing() {
             <option value="STANDARD">Standard</option>
           </select>
 
-          <input
-            type="text"
-            name="location"
-            placeholder="Location"
-            value={formData.location}
-            onChange={handleChange}
+          <LocationPicker
+            label="Pickup Location / Farm Address"
+            placeholder="Search pickup place (e.g. Nashik APMC, Pune Market Yard, Vashi APMC)..."
+            initialAddress={formData.location}
+            initialLat={formData.latitude}
+            initialLng={formData.longitude}
             required
+            onChange={({ address, lat, lng }) => {
+              setFormData((prev) => ({
+                ...prev,
+                location: address,
+                latitude: lat,
+                longitude: lng,
+              }));
+            }}
           />
 
           <input

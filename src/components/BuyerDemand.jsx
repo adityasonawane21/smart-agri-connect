@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API } from "../config";
+import LocationPicker from "./LocationPicker";
 
 function BuyerDemand() {
   const user = JSON.parse(localStorage.getItem("user"));
@@ -10,6 +11,8 @@ function BuyerDemand() {
     unit: "KG",
     destination: user?.location || "Mumbai",
     delivery_address: "",
+    delivery_lat: null,
+    delivery_lng: null,
     delivery_contact_name: user?.name || "",
     delivery_phone: user?.phone || "",
     required_date: "",
@@ -209,17 +212,26 @@ function BuyerDemand() {
                   </label>
                 </div>
 
-                <div className="form-grid">
-                  <label>
-                    Delivery City
-                    <input
-                      name="destination"
-                      value={form.destination}
-                      onChange={change}
-                      required
-                    />
-                  </label>
+                {/* Autocomplete Location Picker for Delivery Destination */}
+                <LocationPicker
+                  label="Delivery Destination"
+                  placeholder="Search delivery place (e.g. Mumbai Wholesale Market, Vashi APMC)..."
+                  initialAddress={form.delivery_address || form.destination}
+                  initialLat={form.delivery_lat}
+                  initialLng={form.delivery_lng}
+                  required
+                  onChange={({ address, lat, lng }) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      destination: address ? address.split(",")[0].trim() : prev.destination,
+                      delivery_address: address,
+                      delivery_lat: lat,
+                      delivery_lng: lng,
+                    }));
+                  }}
+                />
 
+                <div className="form-grid">
                   <label>
                     Required Date
                     <input
@@ -231,18 +243,6 @@ function BuyerDemand() {
                     />
                   </label>
                 </div>
-
-                <label>
-                  Complete Delivery Address
-                  <textarea
-                    rows="3"
-                    name="delivery_address"
-                    value={form.delivery_address}
-                    onChange={change}
-                    placeholder="Warehouse / restaurant / shop address"
-                    required
-                  />
-                </label>
 
                 <div className="form-grid">
                   <label>

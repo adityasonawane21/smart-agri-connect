@@ -1,4 +1,6 @@
 const express = require("express");
+const http = require("http");
+const { Server: SocketIOServer } = require("socket.io");
 const mysql = require("mysql2");
 const bcrypt = require("bcryptjs");
 const cors = require("cors");
@@ -8,6 +10,15 @@ const fs = require("fs");
 require("dotenv").config();
 
 const app = express();
+const httpServer = http.createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -147,6 +158,77 @@ const cityCoordinates = {
     lat: 21.1458,
     lng: 79.0882,
   },
+
+  // Agricultural Markets & APMC Hubs
+  "nashik apmc": {
+    lat: 20.0123,
+    lng: 73.7891,
+  },
+
+  "pune market yard": {
+    lat: 18.4984,
+    lng: 73.8647,
+  },
+
+  "vashi apmc": {
+    lat: 19.0759,
+    lng: 73.0033,
+  },
+
+  "mumbai wholesale market": {
+    lat: 19.033,
+    lng: 72.86,
+  },
+
+  "dadar market": {
+    lat: 19.0178,
+    lng: 72.8478,
+  },
+
+  lasalgaon: {
+    lat: 20.1478,
+    lng: 74.2289,
+  },
+
+  pimpalgaon: {
+    lat: 20.1704,
+    lng: 73.9854,
+  },
+
+  baramati: {
+    lat: 18.1517,
+    lng: 74.5772,
+  },
+
+  sangli: {
+    lat: 16.8524,
+    lng: 74.5815,
+  },
+
+  kolhapur: {
+    lat: 16.705,
+    lng: 74.2433,
+  },
+
+  kalyan: {
+    lat: 19.2403,
+    lng: 73.1305,
+  },
+
+  jalgaon: {
+    lat: 21.0077,
+    lng: 75.5626,
+  },
+
+  jalgaow: {
+    lat: 21.0077,
+    lng: 75.5626,
+  },
+
+  mulund: {
+    lat: 19.1726,
+    lng: 72.9565,
+  },
 };
 
 // =====================================================
@@ -202,7 +284,7 @@ const cleanDate = (value) => {
         `${legacy[1]} ${legacy[2]}, ${new Date().getFullYear()}`
       );
 
-    if (
+  if (
       !Number.isNaN(
         parsed.getTime()
       )
@@ -238,25 +320,32 @@ function getCoordinates(
   lat,
   lng
 ) {
+  const nLat = Number(lat);
+  const nLng = Number(lng);
   if (
-    Number.isFinite(
-      Number(lat)
-    ) &&
-    Number.isFinite(
-      Number(lng)
-    )
+    Number.isFinite(nLat) &&
+    Number.isFinite(nLng) &&
+    nLat !== 0 &&
+    nLng !== 0
   ) {
     return {
-      lat: Number(lat),
-      lng: Number(lng),
+      lat: nLat,
+      lng: nLng,
     };
   }
 
-  return (
-    cityCoordinates[
-      normalize(location)
-    ] || null
-  );
+  const norm = normalize(location);
+  if (cityCoordinates[norm]) {
+    return cityCoordinates[norm];
+  }
+
+  for (const [key, coord] of Object.entries(cityCoordinates)) {
+    if (norm.includes(key)) {
+      return coord;
+    }
+  }
+
+  return null;
 }
 
 // =====================================================
@@ -1062,6 +1151,71 @@ async function ensureSchema() {
       column,
       definition
     );
+  }
+
+  // ===================================================
+  // RATINGS TABLE
+  // ===================================================
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS ratings (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      order_id INT NOT NULL,
+      reviewer_id INT NOT NULL,
+      reviewed_user_id INT NOT NULL,
+      reviewer_role ENUM('FARMER', 'BUYER') NOT NULL,
+      rating TINYINT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+      review TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_rating (order_id, reviewer_id, reviewed_user_id),
+      INDEX idx_rating_reviewed (reviewed_user_id),
+      INDEX idx_rating_order (order_id)
+    )
+  `);
+
+  // ===================================================
+  // SHIPMENT TRACKING TABLE
+  // ===================================================
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS shipment_tracking (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      shipment_id INT NOT NULL,
+      order_id INT NOT NULL,
+      farmer_id INT NOT NULL,
+      latitude DECIMAL(10,7) DEFAULT NULL,
+      longitude DECIMAL(10,7) DEFAULT NULL,
+      status VARCHAR(40) DEFAULT 'PENDING',
+      message VARCHAR(255) DEFAULT NULL,
+      recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_st_farmer (farmer_id),
+      INDEX idx_st_order (order_id),
+      INDEX idx_st_shipment (shipment_id),
+      INDEX idx_st_recorded (recorded_at)
+    )
+  `);
+
+  // Safely ensure location coordinates columns exist across tables
+  try {
+    const oCols = await query("SHOW COLUMNS FROM orders");
+    const oFields = oCols.map((c) => c.Field);
+    if (!oFields.includes("pickup_lat")) await query("ALTER TABLE orders ADD COLUMN pickup_lat DECIMAL(10,7) DEFAULT NULL");
+    if (!oFields.includes("pickup_lng")) await query("ALTER TABLE orders ADD COLUMN pickup_lng DECIMAL(10,7) DEFAULT NULL");
+    if (!oFields.includes("delivery_lat")) await query("ALTER TABLE orders ADD COLUMN delivery_lat DECIMAL(10,7) DEFAULT NULL");
+    if (!oFields.includes("delivery_lng")) await query("ALTER TABLE orders ADD COLUMN delivery_lng DECIMAL(10,7) DEFAULT NULL");
+
+    const pCols = await query("SHOW COLUMNS FROM products");
+    const pFields = pCols.map((c) => c.Field);
+    if (!pFields.includes("latitude")) await query("ALTER TABLE products ADD COLUMN latitude DECIMAL(10,7) DEFAULT NULL");
+    if (!pFields.includes("longitude")) await query("ALTER TABLE products ADD COLUMN longitude DECIMAL(10,7) DEFAULT NULL");
+
+    const dCols = await query("SHOW COLUMNS FROM buyer_demands");
+    const dFields = dCols.map((c) => c.Field);
+    if (!dFields.includes("destination_lat")) await query("ALTER TABLE buyer_demands ADD COLUMN destination_lat DECIMAL(10,7) DEFAULT NULL");
+    if (!dFields.includes("destination_lng")) await query("ALTER TABLE buyer_demands ADD COLUMN destination_lng DECIMAL(10,7) DEFAULT NULL");
+  } catch (schemaColErr) {
+    console.warn("Location column check warning:", schemaColErr.message);
   }
 
   console.log(
@@ -4994,19 +5148,29 @@ app.get(
           ]
         );
 
-      res.json(
-        orders
-      );
-    } catch (error) {
-      console.error(
-        "Orders fetch error:",
-        error
-      );
+      const ordersWithTracking = [];
+      for (const ord of orders) {
+        const tr = await getLatestTracking(ord.id);
+        const originCoord = getCoordinates(ord.pickup_location, ord.pickup_lat, ord.pickup_lng);
+        const destCoord = getCoordinates(ord.delivery_city);
+        ordersWithTracking.push({
+          ...ord,
+          origin_lat: originCoord ? originCoord.lat : null,
+          origin_lng: originCoord ? originCoord.lng : null,
+          dest_lat: destCoord ? destCoord.lat : null,
+          dest_lng: destCoord ? destCoord.lng : null,
+          live_lat: tr && tr.latitude !== null ? tr.latitude : (originCoord ? originCoord.lat : null),
+          live_lng: tr && tr.longitude !== null ? tr.longitude : (originCoord ? originCoord.lng : null),
+          tracking_status: tr ? tr.status : ord.status,
+          tracking_message: tr ? tr.message : null,
+          tracking_updated_at: tr ? tr.recorded_at : null,
+        });
+      }
 
-      res.status(500).json({
-        message:
-          "Server error.",
-      });
+      res.json(ordersWithTracking);
+    } catch (error) {
+      console.error("Orders fetch error:", error);
+      res.status(500).json({ message: "Server error." });
     }
   }
 );
@@ -5051,15 +5215,13 @@ app.get(
             WHERE o.id = ?
           `,
           [
-            req.params
-              .orderId,
+            req.params.orderId,
           ]
         );
 
       if (!rows.length) {
         return res.status(404).json({
-          message:
-            "Order not found.",
+          message: "Order not found.",
         });
       }
 
@@ -5067,39 +5229,174 @@ app.get(
         await query(
           `
             SELECT *
-
             FROM order_status_history
-
             WHERE order_id = ?
-
-            ORDER BY
-              created_at ASC
+            ORDER BY created_at ASC
           `,
           [
-            req.params
-              .orderId,
+            req.params.orderId,
           ]
         );
 
-      res.json({
-        order:
-          rows[0],
+      const latestTracking = await getLatestTracking(req.params.orderId);
+      const originCoord = getCoordinates(rows[0].pickup_location, rows[0].pickup_lat, rows[0].pickup_lng);
+      const destCoord = getCoordinates(rows[0].delivery_city);
 
+      res.json({
+        order: {
+          ...rows[0],
+          origin_lat: originCoord ? originCoord.lat : null,
+          origin_lng: originCoord ? originCoord.lng : null,
+          dest_lat: destCoord ? destCoord.lat : null,
+          dest_lng: destCoord ? destCoord.lng : null,
+          live_lat: latestTracking && latestTracking.latitude !== null ? latestTracking.latitude : (originCoord ? originCoord.lat : null),
+          live_lng: latestTracking && latestTracking.longitude !== null ? latestTracking.longitude : (originCoord ? originCoord.lng : null),
+          tracking_status: latestTracking ? latestTracking.status : rows[0].status,
+          tracking_message: latestTracking ? latestTracking.message : null,
+          tracking_updated_at: latestTracking ? latestTracking.recorded_at : null,
+        },
         history,
+        latest_tracking: latestTracking,
       });
     } catch (error) {
-      console.error(
-        "Order detail error:",
-        error
-      );
-
-      res.status(500).json({
-        message:
-          "Server error.",
-      });
+      console.error("Order detail error:", error);
+      res.status(500).json({ message: "Server error." });
     }
   }
 );
+
+// =====================================================
+// ORDER ROUTE GEOMETRY & LIVE TRACKING (FROM ACCEPTED PICKUP TO PLACED DELIVERY CITY)
+// =====================================================
+
+app.get("/api/orders/:orderId/route-geometry", async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const rows = await query(
+      `SELECT o.*, uf.name AS farmer_name, ub.name AS buyer_name
+       FROM orders o
+       JOIN users uf ON o.farmer_id = uf.id
+       JOIN users ub ON o.buyer_id = ub.id
+       WHERE o.id = ?`,
+      [orderId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const order = rows[0];
+
+    // From where the order is accepted (Farmer's pickup location)
+    const originCoord = getCoordinates(order.pickup_location, order.pickup_lat, order.pickup_lng) || { lat: 19.9975, lng: 73.7898 };
+
+    // To where order is placed (General delivery city only — NOT exact street address)
+    const destCoord = getCoordinates(order.delivery_city) || { lat: 19.076, lng: 72.8777 };
+
+    // Get latest live tracking (GPS)
+    const latestTracking = await getLatestTracking(orderId);
+
+    // Call OSRM to get real road polyline connecting this specific farmer's pickup to destination
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originCoord.lng},${originCoord.lat};${destCoord.lng},${destCoord.lat}?overview=full&geometries=geojson`;
+      const osrmRes = await fetch(osrmUrl, {
+        headers: { "User-Agent": "SmartAgriConnect-SIH2026/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (osrmRes.ok) {
+        const data = await osrmRes.json();
+        if (data.code === "Ok" && data.routes && data.routes.length > 0) {
+          const r = data.routes[0];
+          return res.json({
+            success: true,
+            order_id: orderId,
+            order_code: order.order_code,
+            farmer_name: order.farmer_name,
+            buyer_name: order.buyer_name,
+            crop_name: order.crop_name,
+            quantity: order.quantity,
+            unit: order.unit,
+            status: order.status,
+            origin: {
+              label: `Accepted Pickup (${order.pickup_location || "Farmer Pickup"})`,
+              location: order.pickup_location,
+              farmer_name: order.farmer_name,
+              lat: originCoord.lat,
+              lng: originCoord.lng,
+            },
+            destination: {
+              label: `Order Destination (${order.delivery_city || "Delivery City"})`,
+              city: order.delivery_city,
+              lat: destCoord.lat,
+              lng: destCoord.lng,
+            },
+            provider: "OSRM",
+            distance_km: Number((r.distance / 1000).toFixed(1)),
+            duration_minutes: Math.round(r.duration / 60),
+            geometry: r.geometry,
+            live_tracking: latestTracking || {
+              latitude: originCoord.lat,
+              longitude: originCoord.lng,
+              status: order.status,
+              recorded_at: order.created_at,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("OSRM order route fallback:", e.message);
+    }
+
+    // Fallback: straight line from pickup origin to destination
+    res.json({
+      success: true,
+      order_id: orderId,
+      order_code: order.order_code,
+      farmer_name: order.farmer_name,
+      buyer_name: order.buyer_name,
+      crop_name: order.crop_name,
+      quantity: order.quantity,
+      unit: order.unit,
+      status: order.status,
+      origin: {
+        label: `Accepted Pickup (${order.pickup_location || "Farmer Pickup"})`,
+        location: order.pickup_location,
+        farmer_name: order.farmer_name,
+        lat: originCoord.lat,
+        lng: originCoord.lng,
+      },
+      destination: {
+        label: `Order Destination (${order.delivery_city || "Delivery City"})`,
+        city: order.delivery_city,
+        lat: destCoord.lat,
+        lng: destCoord.lng,
+      },
+      provider: "FALLBACK",
+      distance_km: Math.round(haversineDistance(originCoord.lat, originCoord.lng, destCoord.lat, destCoord.lng) * 1.2),
+      duration_minutes: 120,
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [originCoord.lng, originCoord.lat],
+          [destCoord.lng, destCoord.lat],
+        ],
+      },
+      live_tracking: latestTracking || {
+        latitude: originCoord.lat,
+        longitude: originCoord.lng,
+        status: order.status,
+        recorded_at: order.created_at,
+      },
+    });
+  } catch (error) {
+    console.error("Order route geometry error:", error);
+    res.status(500).json({ success: false, message: "Unable to calculate order route." });
+  }
+});
 
 // =====================================================
 // ORDER TRANSITIONS
@@ -5147,7 +5444,7 @@ app.put(
         actor_id,
         actor_role,
         note,
-      } = req.body;
+      } = req.body || {};
 
       const rows =
         await query(
@@ -5304,6 +5601,27 @@ app.put(
       await updateShipmentAggregate(
         order.shipment_id
       );
+
+      // Keep shipment_tracking synchronized
+      await query(
+        `INSERT INTO shipment_tracking (shipment_id, order_id, farmer_id, status, message)
+         VALUES (?, ?, ?, ?, ?)`,
+        [order.shipment_id || 0, order.id, order.farmer_id, status, note || `Status updated to ${status}`]
+      );
+
+      // Real-time notification over Socket.IO
+      io.emit("tracking:update", {
+        order_id: order.id,
+        shipment_id: order.shipment_id,
+        farmer_id: order.farmer_id,
+        status,
+        message: note || `Status updated to ${status}`,
+        timestamp: new Date().toISOString(),
+      });
+      io.emit("order:update", {
+        order_id: order.id,
+        status,
+      });
 
       res.json({
         message:
@@ -5909,6 +6227,883 @@ app.get(
 );
 
 // =====================================================
+// RATING APIS
+// =====================================================
+
+// POST /api/ratings — submit a rating
+app.post("/api/ratings", async (req, res) => {
+  try {
+    const { order_id, reviewer_id, reviewer_role, rating, review } = req.body || {};
+
+    if (!order_id || !reviewer_id || !reviewer_role || !rating) {
+      return res.status(400).json({ success: false, message: "order_id, reviewer_id, reviewer_role and rating are required." });
+    }
+
+    const ratingNum = Number(rating);
+    if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({ success: false, message: "Rating must be an integer between 1 and 5." });
+    }
+
+    if (!["FARMER", "BUYER"].includes(reviewer_role)) {
+      return res.status(400).json({ success: false, message: "reviewer_role must be FARMER or BUYER." });
+    }
+
+    // Load the order and verify reviewer is involved
+    const orders = await query(
+      `SELECT o.*, ub.role AS buyer_role, uf.role AS farmer_role
+       FROM orders o
+       JOIN users ub ON o.buyer_id = ub.id
+       JOIN users uf ON o.farmer_id = uf.id
+       WHERE o.id = ?`,
+      [order_id]
+    );
+
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const order = orders[0];
+
+    // Verify reviewer is a participant in this order
+    const isBuyer = Number(reviewer_id) === Number(order.buyer_id) && reviewer_role === "BUYER";
+    const isFarmer = Number(reviewer_id) === Number(order.farmer_id) && reviewer_role === "FARMER";
+
+    if (!isBuyer && !isFarmer) {
+      return res.status(403).json({ success: false, message: "You are not authorized to rate this order." });
+    }
+
+    // Order must be DELIVERED
+    if (order.status !== "DELIVERED") {
+      return res.status(400).json({ success: false, message: "You can only rate after the order is delivered." });
+    }
+
+    // Determine who is being reviewed
+    const reviewed_user_id = isBuyer ? order.farmer_id : order.buyer_id;
+
+    // Cannot rate yourself
+    if (Number(reviewer_id) === Number(reviewed_user_id)) {
+      return res.status(400).json({ success: false, message: "You cannot rate yourself." });
+    }
+
+    // Check for duplicate rating
+    const existing = await query(
+      `SELECT id FROM ratings WHERE order_id = ? AND reviewer_id = ? AND reviewed_user_id = ?`,
+      [order_id, reviewer_id, reviewed_user_id]
+    );
+
+    if (existing.length) {
+      return res.status(409).json({ success: false, message: "You have already rated this person for this order." });
+    }
+
+    const result = await query(
+      `INSERT INTO ratings (order_id, reviewer_id, reviewed_user_id, reviewer_role, rating, review)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [order_id, reviewer_id, reviewed_user_id, reviewer_role, ratingNum, review || null]
+    );
+
+    res.status(201).json({ success: true, message: "Rating submitted successfully.", ratingId: result.insertId });
+  } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ success: false, message: "You have already rated this person for this order." });
+    }
+    console.error("Rating creation error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/users/:userId/ratings — get all ratings received by a user
+app.get("/api/users/:userId/ratings", async (req, res) => {
+  try {
+    const ratings = await query(
+      `SELECT r.*,
+              u.name AS reviewer_name,
+              o.order_code, o.crop_name, o.quantity, o.unit
+       FROM ratings r
+       JOIN users u ON r.reviewer_id = u.id
+       JOIN orders o ON r.order_id = o.id
+       WHERE r.reviewed_user_id = ?
+       ORDER BY r.created_at DESC`,
+      [req.params.userId]
+    );
+
+    res.json({ success: true, ratings });
+  } catch (error) {
+    console.error("Get ratings error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/users/:userId/rating-summary — avg rating + count
+app.get("/api/users/:userId/rating-summary", async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT COUNT(*) AS total_ratings,
+              ROUND(AVG(rating), 1) AS average_rating
+       FROM ratings
+       WHERE reviewed_user_id = ?`,
+      [req.params.userId]
+    );
+
+    const { total_ratings, average_rating } = rows[0];
+    res.json({
+      success: true,
+      user_id: Number(req.params.userId),
+      total_ratings: Number(total_ratings) || 0,
+      average_rating: average_rating ? Number(average_rating) : null,
+    });
+  } catch (error) {
+    console.error("Rating summary error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/orders/:orderId/ratings — check if a user already rated this order
+app.get("/api/orders/:orderId/ratings", async (req, res) => {
+  try {
+    const { reviewer_id } = req.query;
+
+    const ratings = await query(
+      `SELECT r.*, u.name AS reviewer_name
+       FROM ratings r
+       JOIN users u ON r.reviewer_id = u.id
+       WHERE r.order_id = ?`,
+      [req.params.orderId]
+    );
+
+    const myRating = reviewer_id
+      ? ratings.find((r) => Number(r.reviewer_id) === Number(reviewer_id))
+      : null;
+
+    res.json({ success: true, ratings, my_rating: myRating || null });
+  } catch (error) {
+    console.error("Order ratings error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// =====================================================
+// TRACKING STATUS FLOW (for shipment_tracking table)
+// =====================================================
+// PENDING -> READY_FOR_PICKUP -> PICKED_UP -> IN_TRANSIT
+//          -> NEAR_DESTINATION -> DELIVERED
+
+const trackingTransitions = {
+  PENDING: ["READY_FOR_PICKUP"],
+  READY_FOR_PICKUP: ["PICKED_UP"],
+  PICKED_UP: ["IN_TRANSIT"],
+  IN_TRANSIT: ["NEAR_DESTINATION", "DELIVERED"],
+  NEAR_DESTINATION: ["DELIVERED"],
+  DELIVERED: [],
+};
+
+// Helper: get latest tracking for an order
+async function getLatestTracking(orderId) {
+  const rows = await query(
+    `SELECT * FROM shipment_tracking WHERE order_id = ? ORDER BY recorded_at DESC LIMIT 1`,
+    [orderId]
+  );
+  return rows[0] || null;
+}
+
+// POST /api/orders/:orderId/tracking/start — farmer starts tracking
+app.post("/api/orders/:orderId/tracking/start", async (req, res) => {
+  try {
+    const { farmer_id } = req.body || {};
+    const orderId = Number(req.params.orderId);
+
+    if (!farmer_id) {
+      return res.status(400).json({ success: false, message: "farmer_id is required." });
+    }
+
+    // Load order and verify ownership
+    const orders = await query(`SELECT * FROM orders WHERE id = ?`, [orderId]);
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const order = orders[0];
+
+    if (Number(farmer_id) !== Number(order.farmer_id)) {
+      return res.status(403).json({ success: false, message: "You are not authorized to track this order." });
+    }
+
+    if (["CANCELLED"].includes(order.status)) {
+      return res.status(400).json({ success: false, message: "Cannot start tracking for a cancelled order." });
+    }
+
+    // Check if already tracking
+    const existing = await getLatestTracking(orderId);
+    if (existing && existing.status !== "PENDING") {
+      return res.status(409).json({ success: false, message: "Tracking already started for this order.", current_status: existing.status });
+    }
+
+    const result = await query(
+      `INSERT INTO shipment_tracking (shipment_id, order_id, farmer_id, status, message)
+       VALUES (?, ?, ?, 'READY_FOR_PICKUP', 'Farmer started delivery tracking')`,
+      [order.shipment_id || 0, orderId, farmer_id]
+    );
+
+    // Emit Socket.IO event
+    io.emit("tracking:update", {
+      shipment_id: order.shipment_id,
+      order_id: orderId,
+      farmer_id: Number(farmer_id),
+      latitude: null,
+      longitude: null,
+      status: "READY_FOR_PICKUP",
+      message: "Farmer started delivery tracking",
+      timestamp: new Date().toISOString(),
+    });
+
+    res.status(201).json({ success: true, message: "Tracking started.", tracking_id: result.insertId, status: "READY_FOR_PICKUP" });
+  } catch (error) {
+    console.error("Tracking start error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// POST /api/orders/:orderId/tracking/location — farmer updates GPS location
+app.post("/api/orders/:orderId/tracking/location", async (req, res) => {
+  try {
+    const { farmer_id, latitude, longitude, message } = req.body || {};
+    const orderId = Number(req.params.orderId);
+
+    if (!farmer_id || latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ success: false, message: "farmer_id, latitude and longitude are required." });
+    }
+
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ success: false, message: "Invalid latitude or longitude." });
+    }
+
+    // Load order and verify ownership
+    const orders = await query(`SELECT * FROM orders WHERE id = ?`, [orderId]);
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const order = orders[0];
+
+    if (Number(farmer_id) !== Number(order.farmer_id)) {
+      return res.status(403).json({ success: false, message: "You are not authorized to update tracking for this order." });
+    }
+
+    // Get current tracking status
+    const current = await getLatestTracking(orderId);
+    const currentStatus = current ? current.status : "PENDING";
+
+    // Don't update if already delivered
+    if (currentStatus === "DELIVERED") {
+      return res.status(400).json({ success: false, message: "Order is already delivered." });
+    }
+
+    const result = await query(
+      `INSERT INTO shipment_tracking (shipment_id, order_id, farmer_id, latitude, longitude, status, message)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [order.shipment_id || 0, orderId, Number(farmer_id), lat, lng, currentStatus, message || "Location updated"]
+    );
+
+    const payload = {
+      shipment_id: order.shipment_id,
+      order_id: orderId,
+      farmer_id: Number(farmer_id),
+      latitude: lat,
+      longitude: lng,
+      status: currentStatus,
+      message: message || "Location updated",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Emit real-time Socket.IO event
+    io.emit("tracking:update", payload);
+
+    res.json({ success: true, message: "Location updated.", tracking_id: result.insertId, ...payload });
+  } catch (error) {
+    console.error("Tracking location error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// PUT /api/orders/:orderId/tracking/status — farmer updates delivery status
+app.put("/api/orders/:orderId/tracking/status", async (req, res) => {
+  try {
+    const { farmer_id, status, message, latitude, longitude } = req.body || {};
+    const orderId = Number(req.params.orderId);
+
+    if (!farmer_id || !status) {
+      return res.status(400).json({ success: false, message: "farmer_id and status are required." });
+    }
+
+    const validStatuses = ["READY_FOR_PICKUP", "PICKED_UP", "IN_TRANSIT", "NEAR_DESTINATION", "DELIVERED"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
+    }
+
+    // Load order and verify ownership
+    const orders = await query(`SELECT * FROM orders WHERE id = ?`, [orderId]);
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const order = orders[0];
+
+    if (Number(farmer_id) !== Number(order.farmer_id)) {
+      return res.status(403).json({ success: false, message: "You are not authorized to update tracking for this order." });
+    }
+
+    // Get current tracking status
+    const current = await getLatestTracking(orderId);
+    const currentStatus = current ? current.status : "PENDING";
+
+    const allowed = trackingTransitions[currentStatus] || [];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot transition tracking from ${currentStatus} to ${status}.`,
+        allowed_next: allowed,
+      });
+    }
+
+    const lat = latitude !== undefined ? Number(latitude) : (current?.latitude || null);
+    const lng = longitude !== undefined ? Number(longitude) : (current?.longitude || null);
+
+    await query(
+      `INSERT INTO shipment_tracking (shipment_id, order_id, farmer_id, latitude, longitude, status, message)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [order.shipment_id || 0, orderId, Number(farmer_id), lat, lng, status, message || `Status changed to ${status}`]
+    );
+
+    // If DELIVERED via tracking, also update the order status
+    if (status === "DELIVERED" && order.status === "ARRIVED") {
+      await query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId]);
+      await addOrderHistory(orderId, "DELIVERED", "Marked delivered via tracking.", Number(farmer_id));
+      await updateShipmentAggregate(order.shipment_id);
+    }
+
+    const payload = {
+      shipment_id: order.shipment_id,
+      order_id: orderId,
+      farmer_id: Number(farmer_id),
+      latitude: lat,
+      longitude: lng,
+      status,
+      message: message || `Status changed to ${status}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    io.emit("tracking:update", payload);
+
+    res.json({ success: true, message: `Tracking status updated to ${status}.`, ...payload });
+  } catch (error) {
+    console.error("Tracking status error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/orders/:orderId/tracking — get tracking history for an order
+app.get("/api/orders/:orderId/tracking", async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+
+    const orders = await query(`SELECT * FROM orders WHERE id = ?`, [orderId]);
+    if (!orders.length) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    const tracking = await query(
+      `SELECT * FROM shipment_tracking WHERE order_id = ? ORDER BY recorded_at DESC`,
+      [orderId]
+    );
+
+    const latest = tracking[0] || null;
+
+    res.json({
+      success: true,
+      order_id: orderId,
+      latest_tracking: latest,
+      history: tracking,
+    });
+  } catch (error) {
+    console.error("Get tracking error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/shipments/:shipmentId/tracking — tracking for all orders in a shipment
+app.get("/api/shipments/:shipmentId/tracking", async (req, res) => {
+  try {
+    const shipmentId = Number(req.params.shipmentId);
+
+    // Get all orders in this shipment with their latest tracking
+    const orders = await query(
+      `SELECT o.*, uf.name AS farmer_name, ub.name AS buyer_name
+       FROM orders o
+       JOIN users uf ON o.farmer_id = uf.id
+       JOIN users ub ON o.buyer_id = ub.id
+       WHERE o.shipment_id = ? AND o.status <> 'CANCELLED'
+       ORDER BY o.id`,
+      [shipmentId]
+    );
+
+    const orderTracking = [];
+
+    for (const order of orders) {
+      const latest = await getLatestTracking(order.id);
+      orderTracking.push({
+        order_id: order.id,
+        order_code: order.order_code,
+        farmer_id: order.farmer_id,
+        farmer_name: order.farmer_name,
+        buyer_id: order.buyer_id,
+        buyer_name: order.buyer_name,
+        crop_name: order.crop_name,
+        quantity: order.quantity,
+        unit: order.unit,
+        pickup_location: order.pickup_location,
+        delivery_city: order.delivery_city,
+        order_status: order.status,
+        tracking_status: latest ? latest.status : "PENDING",
+        latitude: latest ? latest.latitude : null,
+        longitude: latest ? latest.longitude : null,
+        message: latest ? latest.message : null,
+        last_updated: latest ? latest.recorded_at : null,
+      });
+    }
+
+    // Calculate overall progress
+    const totalQuantity = orders.reduce((sum, o) => sum + toNum(o.quantity), 0);
+    const deliveredQuantity = orderTracking
+      .filter((t) => t.tracking_status === "DELIVERED" || t.order_status === "DELIVERED")
+      .reduce((sum, t) => sum + toNum(t.quantity), 0);
+
+    res.json({
+      success: true,
+      shipment_id: shipmentId,
+      orders: orderTracking,
+      summary: {
+        total_quantity: totalQuantity,
+        delivered_quantity: deliveredQuantity,
+        progress_percent: totalQuantity ? Math.round((deliveredQuantity / totalQuantity) * 100) : 0,
+        total_orders: orders.length,
+        delivered_orders: orderTracking.filter((t) => t.tracking_status === "DELIVERED" || t.order_status === "DELIVERED").length,
+      },
+    });
+  } catch (error) {
+    console.error("Shipment tracking error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/buyers/:buyerId/tracking — all active tracking for buyer's orders
+app.get("/api/buyers/:buyerId/tracking", async (req, res) => {
+  try {
+    const buyerId = Number(req.params.buyerId);
+
+    // Get all active orders for this buyer grouped by shipment
+    const orders = await query(
+      `SELECT o.*, uf.name AS farmer_name, uf.phone AS farmer_phone,
+              s.shipment_code, s.destination_city, s.destination_lat, s.destination_lng
+       FROM orders o
+       JOIN users uf ON o.farmer_id = uf.id
+       LEFT JOIN shipments s ON o.shipment_id = s.id
+       WHERE o.buyer_id = ? AND o.status NOT IN ('CANCELLED')
+       ORDER BY o.shipment_id, o.id`,
+      [buyerId]
+    );
+
+    const orderTracking = [];
+
+    for (const order of orders) {
+      const latest = await getLatestTracking(order.id);
+      orderTracking.push({
+        order_id: order.id,
+        order_code: order.order_code,
+        farmer_id: order.farmer_id,
+        farmer_name: order.farmer_name,
+        farmer_phone: order.farmer_phone,
+        crop_name: order.crop_name,
+        quantity: order.quantity,
+        unit: order.unit,
+        pickup_location: order.pickup_location,
+        delivery_city: order.delivery_city,
+        delivery_address: order.delivery_address,
+        order_status: order.status,
+        shipment_id: order.shipment_id,
+        shipment_code: order.shipment_code,
+        destination_lat: order.destination_lat,
+        destination_lng: order.destination_lng,
+        tracking_status: latest ? latest.status : "PENDING",
+        latitude: latest ? latest.latitude : null,
+        longitude: latest ? latest.longitude : null,
+        message: latest ? latest.message : null,
+        last_updated: latest ? latest.recorded_at : null,
+      });
+    }
+
+    const totalQuantity = orders.reduce((sum, o) => sum + toNum(o.quantity), 0);
+    const deliveredQuantity = orderTracking
+      .filter((t) => t.tracking_status === "DELIVERED" || t.order_status === "DELIVERED")
+      .reduce((sum, t) => sum + toNum(t.quantity), 0);
+
+    res.json({
+      success: true,
+      buyer_id: buyerId,
+      orders: orderTracking,
+      summary: {
+        total_quantity: totalQuantity,
+        delivered_quantity: deliveredQuantity,
+        progress_percent: totalQuantity ? Math.round((deliveredQuantity / totalQuantity) * 100) : 0,
+        total_orders: orders.length,
+        delivered_orders: orderTracking.filter((t) => t.tracking_status === "DELIVERED" || t.order_status === "DELIVERED").length,
+      },
+    });
+  } catch (error) {
+    console.error("Buyer tracking error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// GET /api/farmers/:farmerId/active-orders — farmer's active deliveries for tracking
+app.get("/api/farmers/:farmerId/active-orders", async (req, res) => {
+  try {
+    const farmerId = Number(req.params.farmerId);
+
+    const orders = await query(
+      `SELECT o.*, ub.name AS buyer_name, ub.location AS buyer_location,
+              s.shipment_code, s.destination_city, s.destination_lat, s.destination_lng
+       FROM orders o
+       JOIN users ub ON o.buyer_id = ub.id
+       LEFT JOIN shipments s ON o.shipment_id = s.id
+       WHERE o.farmer_id = ? AND o.status NOT IN ('CANCELLED', 'DELIVERED')
+       ORDER BY o.created_at DESC`,
+      [farmerId]
+    );
+
+    const result = [];
+    for (const order of orders) {
+      const latest = await getLatestTracking(order.id);
+      result.push({
+        ...order,
+        tracking_status: latest ? latest.status : "PENDING",
+        latitude: latest ? latest.latitude : null,
+        longitude: latest ? latest.longitude : null,
+        message: latest ? latest.message : null,
+        last_updated: latest ? latest.recorded_at : null,
+      });
+    }
+
+    res.json({ success: true, orders: result });
+  } catch (error) {
+    console.error("Farmer active orders error:", error);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// =====================================================
+// GEOCODING & PLACE SEARCH APIS (OpenStreetMap Nominatim + APMC Fallback)
+// =====================================================
+
+const KNOWN_MARKETS = [
+  { name: "Nashik APMC, Panchavati, Nashik, Maharashtra, India", lat: 20.0123, lng: 73.7891 },
+  { name: "Pune Market Yard, Gultekdi, Pune, Maharashtra, India", lat: 18.4984, lng: 73.8647 },
+  { name: "Vashi APMC, Sector 19, Navi Mumbai, Maharashtra, India", lat: 19.0759, lng: 73.0033 },
+  { name: "Mumbai Wholesale Market, Dadar West, Mumbai, Maharashtra, India", lat: 19.0330, lng: 72.8600 },
+  { name: "Nashik Road APMC Sub-Market, Nashik, Maharashtra, India", lat: 19.9575, lng: 73.8344 },
+  { name: "Lasalgaon Onion APMC Market, Niphad, Nashik, Maharashtra, India", lat: 20.1478, lng: 74.2289 },
+  { name: "Pimpalgaon Baswant Tomato Market Yard, Nashik, Maharashtra, India", lat: 20.1704, lng: 73.9854 },
+  { name: "Surat APMC Sardar Market, Surat, Gujarat, India", lat: 21.1959, lng: 72.8302 },
+  { name: "Ahmedabad Jamalpur APMC Market, Ahmedabad, Gujarat, India", lat: 23.0120, lng: 72.5800 },
+  { name: "Kalyan APMC Agricultural Produce Market, Thane, Maharashtra, India", lat: 19.2403, lng: 73.1305 },
+  { name: "Nagpur Kalamna APMC Market Yard, Nagpur, Maharashtra, India", lat: 21.1738, lng: 79.1350 },
+  { name: "Baramati APMC Market, Pune, Maharashtra, India", lat: 18.1517, lng: 74.5772 },
+  { name: "Sangli Turmeric Market Yard, Sangli, Maharashtra, India", lat: 16.8524, lng: 74.5815 },
+  { name: "Kolhapur APMC Market Yard, Kolhapur, Maharashtra, India", lat: 16.7050, lng: 74.2433 },
+  { name: "Jalgaon Banana & Grain APMC, Jalgaon, Maharashtra, India", lat: 21.0077, lng: 75.5626 },
+  { name: "Mulund APMC Extension, Mumbai, Maharashtra, India", lat: 19.1726, lng: 72.9565 }
+];
+
+// GET /api/locations/search?q=...
+app.get("/api/locations/search", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (!q || q.length < 2) {
+      return res.json({ success: true, places: [] });
+    }
+
+    // Attempt Nominatim geocoding with timeout
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=in&limit=6&addressdetails=1`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "SmartAgriConnect-SIH2026/1.0 (agri-platform; sih2026@agri.connect)",
+          "Accept-Language": "en-IN,en;q=0.9",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const results = data.map((item) => ({
+            display_name: item.display_name,
+            address: item.display_name,
+            lat: Number(item.lat),
+            lng: Number(item.lon),
+            type: item.type || "place",
+          }));
+          return res.json({ success: true, places: results, provider: "Nominatim" });
+        }
+      }
+    } catch (netErr) {
+      console.warn("Nominatim search fallback:", netErr.message);
+    }
+
+    // Fallback: search known agricultural hubs and cities
+    const qLower = q.toLowerCase();
+    const matches = KNOWN_MARKETS.filter((p) => p.name.toLowerCase().includes(qLower));
+
+    for (const [city, coord] of Object.entries(cityCoordinates)) {
+      if (city.toLowerCase().includes(qLower) || qLower.includes(city.toLowerCase())) {
+        if (!matches.some((m) => m.name.toLowerCase().includes(city))) {
+          matches.push({
+            name: `${city.charAt(0).toUpperCase() + city.slice(1)}, Maharashtra, India`,
+            lat: coord.lat,
+            lng: coord.lng,
+          });
+        }
+      }
+    }
+
+    const fallbackPlaces = matches.map((m) => ({
+      display_name: m.name,
+      address: m.name,
+      lat: m.lat,
+      lng: m.lng,
+      type: "known_market",
+    }));
+
+    res.json({ success: true, places: fallbackPlaces, provider: "LocalCatalog" });
+  } catch (err) {
+    console.error("Location search error:", err);
+    res.status(500).json({ success: false, message: "Unable to search locations." });
+  }
+});
+
+// GET /api/locations/reverse-geocode?lat=...&lng=...
+app.get("/api/locations/reverse-geocode", async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ success: false, message: "Valid lat and lng required." });
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "SmartAgriConnect-SIH2026/1.0 (agri-platform; sih2026@agri.connect)",
+          "Accept-Language": "en-IN,en;q=0.9",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const item = await response.json();
+        if (item && item.display_name) {
+          return res.json({
+            success: true,
+            address: item.display_name,
+            lat,
+            lng,
+            provider: "Nominatim",
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Reverse geocode fallback:", e.message);
+    }
+
+    res.json({
+      success: true,
+      address: `Selected Location (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      lat,
+      lng,
+      provider: "CoordinateFallback",
+    });
+  } catch (err) {
+    console.error("Reverse geocode error:", err);
+    res.status(500).json({ success: false, message: "Reverse geocode failed." });
+  }
+});
+
+// =====================================================
+// SHIPMENT ROAD ROUTE GEOMETRY (OSRM with Haversine Fallback)
+// =====================================================
+
+app.get("/api/shipments/:shipmentId/route-geometry", async (req, res) => {
+  try {
+    const shipmentId = Number(req.params.shipmentId);
+    const details = await getShipmentDetails(shipmentId);
+
+    if (!details || !details.shipment) {
+      return res.status(404).json({ success: false, message: "Shipment not found." });
+    }
+
+    const routeStops = details.route || [];
+    if (!routeStops.length) {
+      return res.json({
+        success: true,
+        shipment_id: shipmentId,
+        provider: "NONE",
+        road_distance_km: 0,
+        eta_minutes: 0,
+        geometry: { type: "LineString", coordinates: [] },
+        stops: [],
+      });
+    }
+
+    // Extract valid coordinates for each stop
+    const validStops = routeStops.map((stop, index) => {
+      const coords = getCoordinates(stop.location, stop.lat, stop.lng);
+      return {
+        stop_index: index + 1,
+        type: stop.type,
+        location: stop.location,
+        farmer_name: stop.farmer_name || null,
+        farmer_id: stop.farmer_id || null,
+        buyer_name: stop.buyer_name || null,
+        buyer_id: stop.buyer_id || null,
+        quantity: stop.quantity,
+        crop_name: details.shipment.crop_name,
+        address: stop.address || stop.location,
+        lat: coords ? coords.lat : 19.076,
+        lng: coords ? coords.lng : 72.8777,
+      };
+    });
+
+    // Build coordinate pairs for OSRM: lon,lat;lon,lat;...
+    const coordsStr = validStops.map((s) => `${s.lng},${s.lat}`).join(";");
+
+    // Try OSRM Road Routing
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`;
+      const osrmRes = await fetch(osrmUrl, {
+        headers: { "User-Agent": "SmartAgriConnect-SIH2026/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (osrmRes.ok) {
+        const osrmData = await osrmRes.json();
+        if (osrmData.code === "Ok" && osrmData.routes && osrmData.routes.length > 0) {
+          const route = osrmData.routes[0];
+          const roadDistKm = Number((route.distance / 1000).toFixed(1));
+          const etaMins = Math.round(route.duration / 60);
+
+          return res.json({
+            success: true,
+            shipment_id: shipmentId,
+            provider: "OSRM",
+            road_distance_km: roadDistKm,
+            eta_minutes: etaMins,
+            geometry: route.geometry,
+            stops: validStops,
+            summary: details.summary,
+          });
+        }
+      }
+    } catch (routingErr) {
+      console.warn("OSRM routing fallback:", routingErr.message);
+    }
+
+    // Fallback: straight lines between points
+    const fallbackCoordinates = validStops.map((s) => [s.lng, s.lat]);
+    res.json({
+      success: true,
+      shipment_id: shipmentId,
+      provider: "HAVERSINE_FALLBACK",
+      warning: "Road route service temporarily unavailable; displaying estimated route line.",
+      road_distance_km: details.summary?.total_distance_km || 0,
+      eta_minutes: details.summary?.estimated_minutes || 0,
+      geometry: {
+        type: "LineString",
+        coordinates: fallbackCoordinates,
+      },
+      stops: validStops,
+      summary: details.summary,
+    });
+  } catch (error) {
+    console.error("Route geometry error:", error);
+    res.status(500).json({ success: false, message: "Unable to calculate route geometry." });
+  }
+});
+
+// GET /api/routes/directions?stops=lng1,lat1;lng2,lat2
+app.get("/api/routes/directions", async (req, res) => {
+  try {
+    const stopsParam = String(req.query.stops || "").trim();
+    if (!stopsParam) {
+      return res.status(400).json({ success: false, message: "stops parameter required (format: lng1,lat1;lng2,lat2)" });
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${stopsParam}?overview=full&geometries=geojson`;
+      const osrmRes = await fetch(osrmUrl, {
+        headers: { "User-Agent": "SmartAgriConnect-SIH2026/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (osrmRes.ok) {
+        const data = await osrmRes.json();
+        if (data.code === "Ok" && data.routes && data.routes.length > 0) {
+          const r = data.routes[0];
+          return res.json({
+            success: true,
+            provider: "OSRM",
+            distance_km: Number((r.distance / 1000).toFixed(1)),
+            duration_minutes: Math.round(r.duration / 60),
+            geometry: r.geometry,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Directions fallback:", e.message);
+    }
+
+    const fallbackPoints = stopsParam.split(";").map((p) => {
+      const [lng, lat] = p.split(",").map(Number);
+      return [lng, lat];
+    });
+
+    res.json({
+      success: true,
+      provider: "FALLBACK",
+      distance_km: 100,
+      duration_minutes: 120,
+      geometry: { type: "LineString", coordinates: fallbackPoints },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Directions calculation failed." });
+  }
+});
+
+// =====================================================
 // STATIC FRONTEND SERVING (PRODUCTION)
 // =====================================================
 
@@ -6003,7 +7198,7 @@ async function startServer() {
         );
       }
 
-      app.listen(
+      httpServer.listen(
         API_PORT,
         "0.0.0.0",
         () =>
@@ -6016,3 +7211,4 @@ async function startServer() {
 }
 
 startServer();
+
