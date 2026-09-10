@@ -524,9 +524,15 @@ async function autoSeedDatabaseIfEmpty() {
         "../database/database_complete.sql"
       );
       if (fs.existsSync(sqlPath)) {
+        // TiDB is MySQL-compatible but does not accept MySQL 8's
+        // utf8mb4_0900_ai_ci collation used by dumps from local MySQL.
+        // Normalize it so a clean cloud database can be initialized.
         const sqlContent = fs.readFileSync(
           sqlPath,
           "utf-8"
+        ).replaceAll(
+          "utf8mb4_0900_ai_ci",
+          "utf8mb4_unicode_ci"
         );
         await db.promise().query(sqlContent);
         console.log(
