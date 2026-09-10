@@ -1,0 +1,26 @@
+SMART AGRI CONNECT — FINAL SIH 2026
+
+SAFE DATABASE MODE
+- Existing smart_agri_connect database is reused.
+- Backend performs additive schema checks only.
+- No DROP / TRUNCATE operations are used.
+
+BACKEND
+  cd backend
+  npm install
+  node server.js
+
+FRONTEND (new terminal)
+  npm install
+  npm run dev
+
+OPEN
+  http://localhost:5173
+
+IMPORTANT
+The backend can backfill older ACCEPTED supply offers into Orders + Shipments.
+For the strongest demo, use:
+Nashik 100 KG + Pune 500 KG + Thane 400 KG = 1000 KG Onion → Mumbai.
+
+
+IMPORTANT: backend has its own package.json with CommonJS mode. Run npm install inside backend, then npm start.
