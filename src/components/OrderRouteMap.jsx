@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { API } from "../config";
 
 function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
@@ -32,19 +34,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
   }, [orderId]);
 
   useEffect(() => {
-    if (!window.L) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.onload = () => initMap();
-      document.head.appendChild(script);
-    } else {
-      initMap();
-    }
+    initMap();
 
     return () => {
       if (leafletMapRef.current) {
@@ -55,7 +45,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
   }, [routeInfo]);
 
   function initMap() {
-    if (!mapRef.current || !window.L || !routeInfo) return;
+    if (!mapRef.current || !routeInfo) return;
 
     if (leafletMapRef.current) {
       leafletMapRef.current.remove();
@@ -65,13 +55,13 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
     const { origin, destination, geometry, live_tracking } = routeInfo;
     const center = [origin.lat, origin.lng];
 
-    const map = window.L.map(mapRef.current, {
+    const map = L.map(mapRef.current, {
       zoomControl: true,
       attributionControl: false,
     }).setView(center, 9);
     leafletMapRef.current = map;
 
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
     }).addTo(map);
 
@@ -79,7 +69,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
     const boundsPoints = [];
 
     // 1. Origin Marker (Farmer Pickup - where order was accepted)
-    const originIcon = window.L.divIcon({
+    const originIcon = L.divIcon({
       className: "",
       html: `
         <div style="background:#166534; color:#fff; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; border:2.5px solid #fff; box-shadow:0 3px 10px rgba(0,0,0,0.35);">
@@ -90,7 +80,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
       iconAnchor: [17, 17],
     });
 
-    const originMarker = window.L.marker([origin.lat, origin.lng], { icon: originIcon })
+    const originMarker = L.marker([origin.lat, origin.lng], { icon: originIcon })
       .addTo(map)
       .bindPopup(`
         <div style="font-family:inherit; min-width:160px;">
@@ -103,7 +93,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
     boundsPoints.push([origin.lat, origin.lng]);
 
     // 2. Destination Marker (Order Destination City - General City only, privacy preserved)
-    const destIcon = window.L.divIcon({
+    const destIcon = L.divIcon({
       className: "",
       html: `
         <div style="background:#b42318; color:#fff; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; border:2.5px solid #fff; box-shadow:0 3px 10px rgba(0,0,0,0.35);">
@@ -114,7 +104,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
       iconAnchor: [17, 17],
     });
 
-    const destMarker = window.L.marker([destination.lat, destination.lng], { icon: destIcon })
+    const destMarker = L.marker([destination.lat, destination.lng], { icon: destIcon })
       .addTo(map)
       .bindPopup(`
         <div style="font-family:inherit; min-width:160px;">
@@ -133,7 +123,7 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
       const colors = ["#0284c7", "#16a34a", "#8b5cf6", "#d97706", "#059669", "#dc2626"];
       const lineColor = colors[Number(orderId) % colors.length] || "#0284c7";
 
-      polylineRef.current = window.L.polyline(latLngs, {
+      polylineRef.current = L.polyline(latLngs, {
         color: lineColor,
         weight: 5,
         opacity: 0.9,
@@ -144,8 +134,10 @@ function OrderRouteMap({ orderId, orderStatus, height = 320 }) {
     }
 
     if (boundsPoints.length > 0) {
-      map.fitBounds(window.L.latLngBounds(boundsPoints), { padding: [35, 35] });
+      map.fitBounds(L.latLngBounds(boundsPoints), { padding: [35, 35] });
     }
+
+    requestAnimationFrame(() => map.invalidateSize());
   }
 
   if (loading) {

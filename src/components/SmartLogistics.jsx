@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { API } from "../config";
 
 function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
@@ -29,19 +31,7 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
   }, [shipmentId]);
 
   useEffect(() => {
-    if (!window.L) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.onload = initMap;
-      document.head.appendChild(script);
-    } else {
-      initMap();
-    }
+    initMap();
 
     return () => {
       if (leafletMapRef.current) {
@@ -52,7 +42,7 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
   }, [routeData]);
 
   function initMap() {
-    if (!mapRef.current || !window.L) return;
+    if (!mapRef.current) return;
 
     if (leafletMapRef.current) {
       leafletMapRef.current.remove();
@@ -62,10 +52,10 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
     const stops = routeData?.stops || [];
     const defaultCenter = stops.length > 0 ? [stops[0].lat, stops[0].lng] : [19.076, 72.8777];
 
-    const map = window.L.map(mapRef.current).setView(defaultCenter, 9);
+    const map = L.map(mapRef.current).setView(defaultCenter, 9);
     leafletMapRef.current = map;
 
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
       maxZoom: 19,
     }).addTo(map);
@@ -76,7 +66,7 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
     if (routeData?.geometry?.coordinates && routeData.geometry.coordinates.length > 0) {
       const polylinePoints = routeData.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
 
-      window.L.polyline(polylinePoints, {
+      L.polyline(polylinePoints, {
         color: "#16a34a",
         weight: 5,
         opacity: 0.85,
@@ -95,7 +85,7 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
         ? `<div style="background:#b42318; color:#fff; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:16px; border:2px solid #fff; box-shadow:0 3px 8px rgba(0,0,0,0.35);">🏁</div>`
         : `<div style="background:#15803d; color:#fff; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px; border:2px solid #fff; box-shadow:0 3px 8px rgba(0,0,0,0.35);">${index + 1}</div>`;
 
-      const customIcon = window.L.divIcon({
+      const customIcon = L.divIcon({
         className: "",
         html: iconHtml,
         iconSize: [34, 34],
@@ -118,14 +108,16 @@ function InteractiveRouteMap({ shipmentId, routeStops = [] }) {
         </div>
       `;
 
-      window.L.marker([stop.lat, stop.lng], { icon: customIcon })
+      L.marker([stop.lat, stop.lng], { icon: customIcon })
         .addTo(map)
         .bindPopup(popupContent);
     });
 
     if (latLngs.length > 0) {
-      map.fitBounds(window.L.latLngBounds(latLngs), { padding: [40, 40] });
+      map.fitBounds(L.latLngBounds(latLngs), { padding: [40, 40] });
     }
+
+    requestAnimationFrame(() => map.invalidateSize());
   }
 
   return (

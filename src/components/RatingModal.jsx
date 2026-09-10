@@ -32,8 +32,14 @@ function RatingModal({ order, currentUser, onClose, onSuccess }) {
           review: review.trim() || null,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to submit rating.");
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json") ? await res.json() : null;
+      if (!res.ok) {
+        throw new Error(
+          data?.message ||
+            "The rating service is temporarily unavailable. Please wait a moment and try again."
+        );
+      }
       if (onSuccess) onSuccess();
       onClose();
     } catch (e) {
@@ -67,6 +73,7 @@ function RatingModal({ order, currentUser, onClose, onSuccess }) {
                 onMouseLeave={() => setHovered(0)}
                 onClick={() => setRating(star)}
                 aria-label={`${star} star`}
+                disabled={loading}
               >
                 ★
               </button>
